@@ -18,6 +18,10 @@ import matplotlib.pyplot as plt
 import tensorflow as tf
 from tensorflow import saved_model as sm
 
+from sys import path
+from os import getcwd
+path.append(getcwd())
+
 from config import global_config
 from crnn_model import crnn_net
 from data_provider import tf_io_pipline_fast_tools
@@ -41,6 +45,43 @@ def init_args():
     return parser.parse_args()
 
 
+def preprocess_image(image_buffer, image_size):
+    """Preprocess JPEG encoded bytes to 3D float Tensor."""
+
+    # Decode the string as an RGB JPEG.
+    # Note that the resulting image contains an unknown height and width
+    # that is set dynamically by decode_jpeg. In other words, the height
+    # and width of image is unknown at compile-time.
+
+    image = tf.image.decode_image(image_buffer, channels=3)
+    image.set_shape([1, 32, 100,3])
+    #image.set_shape([256, 256, 256,3])
+    #mage_size = tuple(CFG.ARCH.INPUT_SIZE)
+    print('image_siez[1], image_size[0], ', image_size[1], image_size[0])
+    image.set_shape=([1, image_size[1], image_size[0], 3])
+    print('image.get_shape() ', image.get_shape())
+
+
+
+    # self.img_pl = tf.placeholder(tf.string, name='input_image_as_bytes')
+    # After this point, all image pixels reside in [0,1)
+    # until the very end, when they're rescaled to (-1, 1).  The various
+    # adjust_* ops all require this range for dtype float.
+
+    image = tf.image.convert_image_dtype(image, dtype=tf.float32)
+
+    # Crop the central region of the image with an area containing 87.5% of
+    # the original image.
+    #image = tf.image.central_crop(image, central_fraction=0.875)
+
+    #image = tf.expand_dims(image, 0)
+    #image = tf.squeeze(image, [0])
+    # Finally, rescale to [-1,1] instead of [0, 1)
+    #image = tf.subtract(image, 0.5)
+    #image = tf.multiply(image, 2.0)
+    return image
+
+
 def build_saved_model(ckpt_path, export_dir):
     """
     Convert source ckpt weights file into tensorflow saved model
@@ -56,10 +97,29 @@ def build_saved_model(ckpt_path, export_dir):
 
     # build inference tensorflow graph
     image_size = tuple(CFG.ARCH.INPUT_SIZE)
+
+    raw_image =  tf.placeholder(tf.string,  name='input_tensor')
+    feature_configs = {
+        'image/encoded': tf.FixedLenFeature(
+            shape=[], dtype=tf.string),
+    }
+    tf_example = tf.parse_example(raw_image , feature_configs)
+
+    jpegs = tf_example['image/encoded']
+
+    image_string = tf.reshape(jpegs, shape=[])
+    image_tensor= preprocess_image(image_string, image_size)
+    print('jpegs = tf_example ', jpegs)
+    print('image_string', image_string)
+    print('image_tensor ,', image_tensor)
+
+    '''
+    image_size = tuple(CFG.ARCH.INPUT_SIZE)
     image_tensor = tf.placeholder(
         dtype=tf.float32,
         shape=[1, image_size[1], image_size[0], 3],
         name='input_tensor')
+    '''
 
     # set crnn net
     net = crnn_net.ShadowNet(
@@ -114,7 +174,8 @@ def build_saved_model(ckpt_path, export_dir):
         # add graph into MetaGraphDef protobuf
         saved_builder.add_meta_graph_and_variables(
             sess,
-            tags=[sm.tag_constants.SERVING],
+            #tags=[sm.tag_constants.SERVING],
+            ["serve"],
             signature_def_map={sm.signature_constants.PREDICT_OUTPUTS: signatur_def}
         )
 
