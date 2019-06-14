@@ -18,9 +18,11 @@ import matplotlib.pyplot as plt
 import tensorflow as tf
 from tensorflow import saved_model as sm
 
+
 from sys import path
 from os import getcwd
 path.append(getcwd())
+
 
 from config import global_config
 from crnn_model import crnn_net
@@ -45,43 +47,6 @@ def init_args():
     return parser.parse_args()
 
 
-def preprocess_image(image_buffer, image_size):
-    """Preprocess JPEG encoded bytes to 3D float Tensor."""
-
-    # Decode the string as an RGB JPEG.
-    # Note that the resulting image contains an unknown height and width
-    # that is set dynamically by decode_jpeg. In other words, the height
-    # and width of image is unknown at compile-time.
-
-    image = tf.image.decode_image(image_buffer, channels=3)
-    image.set_shape([1, 32, 100,3])
-    #image.set_shape([256, 256, 256,3])
-    #mage_size = tuple(CFG.ARCH.INPUT_SIZE)
-    print('image_siez[1], image_size[0], ', image_size[1], image_size[0])
-    image.set_shape=([1, image_size[1], image_size[0], 3])
-    print('image.get_shape() ', image.get_shape())
-
-
-
-    # self.img_pl = tf.placeholder(tf.string, name='input_image_as_bytes')
-    # After this point, all image pixels reside in [0,1)
-    # until the very end, when they're rescaled to (-1, 1).  The various
-    # adjust_* ops all require this range for dtype float.
-
-    image = tf.image.convert_image_dtype(image, dtype=tf.float32)
-
-    # Crop the central region of the image with an area containing 87.5% of
-    # the original image.
-    #image = tf.image.central_crop(image, central_fraction=0.875)
-
-    #image = tf.expand_dims(image, 0)
-    #image = tf.squeeze(image, [0])
-    # Finally, rescale to [-1,1] instead of [0, 1)
-    #image = tf.subtract(image, 0.5)
-    #image = tf.multiply(image, 2.0)
-    return image
-
-
 def build_saved_model(ckpt_path, export_dir):
     """
     Convert source ckpt weights file into tensorflow saved model
@@ -90,36 +55,17 @@ def build_saved_model(ckpt_path, export_dir):
     :return:
     """
 
-    if ops.exists(export_dir):
-        raise ValueError('Export dir must be a dir path that does not exist')
+    #if ops.exists(export_dir):
+    #    raise ValueError('Export dir must be a dir path that does not exist')
 
-    assert ops.exists(ops.split(ckpt_path)[0])
+    #assert ops.exists(ops.split(ckpt_path)[0])
 
     # build inference tensorflow graph
-    image_size = tuple(CFG.ARCH.INPUT_SIZE)
-
-    raw_image =  tf.placeholder(tf.string,  name='input_tensor')
-    feature_configs = {
-        'image/encoded': tf.FixedLenFeature(
-            shape=[], dtype=tf.string),
-    }
-    tf_example = tf.parse_example(raw_image , feature_configs)
-
-    jpegs = tf_example['image/encoded']
-
-    image_string = tf.reshape(jpegs, shape=[])
-    image_tensor= preprocess_image(image_string, image_size)
-    print('jpegs = tf_example ', jpegs)
-    print('image_string', image_string)
-    print('image_tensor ,', image_tensor)
-
-    '''
     image_size = tuple(CFG.ARCH.INPUT_SIZE)
     image_tensor = tf.placeholder(
         dtype=tf.float32,
         shape=[1, image_size[1], image_size[0], 3],
         name='input_tensor')
-    '''
 
     # set crnn net
     net = crnn_net.ShadowNet(
@@ -143,6 +89,9 @@ def build_saved_model(ckpt_path, export_dir):
         merge_repeated=False
     )
 
+    indices_output_tensor_info = tf.saved_model.utils.build_tensor_info(decodes[0].indices)
+    values_output_tensor_info = tf.saved_model.utils.build_tensor_info(decodes[0].values)
+    dense_shape_output_tensor_info = tf.saved_model.utils.build_tensor_info(decodes[0].dense_shape)
     saver = tf.train.Saver()
 
     # Set sess configuration
@@ -167,16 +116,19 @@ def build_saved_model(ckpt_path, export_dir):
         # build SignatureDef protobuf
         signatur_def = sm.signature_def_utils.build_signature_def(
             inputs={'input_tensor': saved_input_tensor},
-            outputs={'prediction': saved_prediction_tensor},
-            method_name=sm.signature_constants.PREDICT_METHOD_NAME
+            outputs = {
+                'decodes_indices':indices_output_tensor_info,
+                'decodes_values':values_output_tensor_info,
+                'decodes_dense_shape':dense_shape_output_tensor_info,
+            },
+            method_name=sm.signature_constants.PREDICT_METHOD_NAME,
         )
 
         # add graph into MetaGraphDef protobuf
         saved_builder.add_meta_graph_and_variables(
             sess,
-            #tags=[sm.tag_constants.SERVING],
-            ["serve"],
-            signature_def_map={sm.signature_constants.PREDICT_OUTPUTS: signatur_def}
+            tags=[sm.tag_constants.SERVING],
+            signature_def_map={sm.signature_constants.DEFAULT_SERVING_SIGNATURE_DEF_KEY: signatur_def},
         )
 
         # save model
@@ -254,4 +206,5 @@ if __name__ == '__main__':
     build_saved_model(args.ckpt_path, args.export_dir)
 
     # test build saved model
-    test_load_saved_model(args.export_dir, args.char_dict_path, args.ord_map_dict_path)
+    #test_load_saved_model(args.export_dir, args.char_dict_path, args.ord_map_dict_path)
+    # nah.
